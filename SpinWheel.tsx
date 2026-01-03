@@ -13,6 +13,8 @@ interface SpinWheelProps {
     onCenterClick: () => void;
     theme?: string;
     size?: number;
+    spinCenterImage?: boolean;
+    disableGrouping?: boolean;
 }
 
 const SpinWheel: React.FC<SpinWheelProps> = ({ 
@@ -24,13 +26,15 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
     centerImage, 
     onCenterClick, 
     theme = 'rainbow', 
-    size = 400 
+    size = 400,
+    spinCenterImage = false,
+    disableGrouping = false
 }) => {
     const canvasRef = useRef<HTMLDivElement>(null);
+    const centerRotationRef = useRef<HTMLDivElement>(null);
     const currentRotation = useRef(0);
     const velocity = useRef(0);
     const animFrameId = useRef<number | null>(null);
-    const lastSegmentIndex = useRef(0);
     const prevSpinTrigger = useRef(spinTrigger);
     const prevStopTrigger = useRef(stopTrigger);
     const [hoveredText, setHoveredText] = useState<string | null>(null);
@@ -38,6 +42,32 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
     const totalCount = segments.length;
 
     const groupedSegments = useMemo(() => {
+        if (disableGrouping) {
+            // Map segments 1:1 without grouping
+            let colors: string[] = [];
+            if (theme === 'rainbow') {
+                colors = Array.from({ length: totalCount }, (_, i) => `hsl(${(i * 360) / totalCount}, 85%, 60%)`);
+            } else {
+                colors = THEMES[theme] || THEMES['popart'];
+            }
+            
+            let currentAngle = 0;
+            const angleSize = 360 / totalCount;
+
+            return segments.map((text, i) => {
+                const segment = {
+                    id: `seg-${i}`,
+                    text,
+                    count: 1,
+                    color: theme === 'rainbow' ? colors[i] : colors[i % colors.length],
+                    startAngle: currentAngle,
+                    endAngle: currentAngle + angleSize
+                };
+                currentAngle += angleSize;
+                return segment;
+            });
+        }
+
         const groups: Record<string, number> = {};
         segments.forEach(seg => { groups[seg] = (groups[seg] || 0) + 1; });
         const uniqueKeys = Object.keys(groups);
@@ -64,7 +94,7 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
             currentAngle += angleSize;
             return segment;
         });
-    }, [segments, theme, totalCount]);
+    }, [segments, theme, totalCount, disableGrouping]);
 
     const getSegmentAtTop = (rotation: number) => {
         const normalizedRotation = rotation % 360;
@@ -100,6 +130,13 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
         }
     }, [stopTrigger, isSpinning, segments, groupedSegments, onSpinEnd]);
 
+    // Handle center rotation reset if setting changes
+    useEffect(() => {
+        if (!spinCenterImage && centerRotationRef.current) {
+            centerRotationRef.current.style.transform = 'rotate(0deg)';
+        }
+    }, [spinCenterImage]);
+
     // Spin animation loop
     useEffect(() => {
         if (spinTrigger === prevSpinTrigger.current) return;
@@ -107,21 +144,31 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
         prevStopTrigger.current = stopTrigger; 
         setHoveredText(null);
         
-        velocity.current = Math.random() * 15 + 20; 
+        velocity.current = Math.random() * 20 + 30; 
         
         const animate = () => {
+            const prevRotation = currentRotation.current;
+            velocity.current = velocity.current * 0.99;
             currentRotation.current += velocity.current;
-            velocity.current *= 0.994;
+            
             if (canvasRef.current) {
                 canvasRef.current.style.transform = `rotate(${currentRotation.current}deg)`;
             }
-            const currentSegment = getSegmentAtTop(currentRotation.current);
-            const currentId = currentSegment ? groupedSegments.indexOf(currentSegment) : -1;
-            if (currentId !== lastSegmentIndex.current && velocity.current > 0.1) {
-                playTickSound();
-                lastSegmentIndex.current = currentId;
+
+            // Sync center image rotation if enabled
+            if (centerRotationRef.current && spinCenterImage) {
+                centerRotationRef.current.style.transform = `rotate(${currentRotation.current}deg)`;
             }
-            if (velocity.current < 0.02) {
+
+            const segAngle = 360 / (groupedSegments.length || 1);
+            const prevIndex = Math.floor(prevRotation / segAngle);
+            const currIndex = Math.floor(currentRotation.current / segAngle);
+
+            if (currIndex !== prevIndex && velocity.current > 0.1) {
+                playTickSound();
+            }
+
+            if (velocity.current < 0.05) {
                 velocity.current = 0;
                 const winnerSeg = getSegmentAtTop(currentRotation.current);
                 const winnerText = winnerSeg ? winnerSeg.text : segments[0];
@@ -135,16 +182,22 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
         if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
         animate();
         return () => { if (animFrameId.current) cancelAnimationFrame(animFrameId.current); };
-    }, [spinTrigger, groupedSegments, segments, stopTrigger, onSpinEnd]);
+    }, [spinTrigger, groupedSegments, segments, stopTrigger, onSpinEnd, spinCenterImage]);
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!isSpinning) setMousePos({ x: e.clientX, y: e.clientY });
     };
 
-    const fontSize = Math.max(1.5, Math.min(4.5, 35 / groupedSegments.length));
-    const calculatedMaxChars = Math.floor(25 - (groupedSegments.length / 4)); 
-    const maxChars = Math.max(8, calculatedMaxChars);
+    const count = groupedSegments.length;
+    const textSpace = 264 / (count || 1);
+    const dynamicFontSize = textSpace * 0.6;
+    const fontSize = Math.max(0.8, Math.min(5, dynamicFontSize));
+
+    const calculatedMaxChars = Math.floor(40 / (fontSize * 0.6));
+    const maxChars = Math.min(30, Math.max(8, calculatedMaxChars));
     
+    const showTextThreshold = 3;
+
     const isCenterImageurl = useMemo(() => {
         if (!centerImage) return false;
         return centerImage.startsWith('http') || centerImage.startsWith('data:') || centerImage.startsWith('/');
@@ -169,13 +222,26 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
                       const midAngle = (seg.startAngle + seg.endAngle) / 2;
                       let displayText = seg.text;
                       if (displayText.length > maxChars) displayText = displayText.substring(0, maxChars) + '..';
-                      const showText = (seg.endAngle - seg.startAngle) > 10;
+                      const angleDiff = seg.endAngle - seg.startAngle;
+                      const showText = angleDiff > showTextThreshold;
                       return (
                           <g key={seg.id} onMouseEnter={() => !isSpinning && setHoveredText(`${seg.text}${seg.count > 1 ? ` (x${seg.count})` : ''}`)} style={{ cursor: isSpinning ? 'default' : 'help' }}>
                               <path d={path} fill={seg.color} stroke="transparent" />
                               {showText && (
                                   <g transform={`rotate(${midAngle}, 50, 50)`}>
-                                      <text x="92" y="50" fill="white" fontSize={fontSize} fontWeight="600" textAnchor="end" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
+                                      <text 
+                                        x="92" 
+                                        y="50" 
+                                        fill="white" 
+                                        fontSize={fontSize} 
+                                        fontWeight="600" 
+                                        textAnchor="end" 
+                                        dominantBaseline="middle" 
+                                        style={{ 
+                                            fontFamily: 'Inter, sans-serif', 
+                                            textShadow: '0px 0px 3px rgba(0,0,0,0.4)' 
+                                        }}
+                                      >
                                           {displayText}
                                       </text>
                                   </g>
@@ -186,21 +252,23 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
                   </svg>
               </div>
             </div>
-            <div onClick={onCenterClick} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full flex items-center justify-center z-10 border-4 border-slate-100 dark:border-slate-800 cursor-pointer overflow-hidden group bg-white dark:bg-slate-700 hover:scale-105 transition-transform shadow-lg" title="Нажми, чтобы изменить картинку" onMouseEnter={() => setHoveredText(null)}>
-               {centerImage ? (
-                 isCenterImageurl ? (
-                    <img src={centerImage} alt="Center" className="w-full h-full object-cover" />
-                 ) : (
-                    <span className="text-4xl select-none leading-none pt-1" role="img" aria-label="emoji">
-                        {centerImage}
-                    </span>
-                 )
-               ) : (
-                 <div className="w-full h-full bg-slate-200 dark:bg-slate-600 flex items-center justify-center">
-                     <span className="text-2xl text-slate-400 dark:text-slate-300">★</span>
-                 </div>
-               )}
-               <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <div onClick={onCenterClick} className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full flex items-center justify-center z-10 border-4 border-slate-100 dark:border-slate-800 cursor-pointer group bg-white dark:bg-slate-700 hover:scale-105 transition-transform shadow-lg" title="Нажми, чтобы изменить картинку" onMouseEnter={() => setHoveredText(null)}>
+               <div ref={centerRotationRef} className="w-full h-full flex items-center justify-center rounded-full overflow-hidden" style={{ willChange: 'transform' }}>
+                   {centerImage ? (
+                     isCenterImageurl ? (
+                        <img src={centerImage} alt="Center" className="w-full h-full object-cover" />
+                     ) : (
+                        <span className="text-4xl select-none leading-none pt-1" role="img" aria-label="emoji">
+                            {centerImage}
+                        </span>
+                     )
+                   ) : (
+                     <div className="w-full h-full bg-slate-200 dark:bg-slate-600 flex items-center justify-center">
+                         <span className="text-2xl text-slate-400 dark:text-slate-300">★</span>
+                     </div>
+                   )}
+               </div>
+               <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full pointer-events-none">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>

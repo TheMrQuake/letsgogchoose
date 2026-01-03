@@ -3,6 +3,9 @@ import SpinWheel from './SpinWheel';
 import ImageCropper from './ImageCropper';
 import CatalogModal from './CatalogModal';
 import SavedListsModal from './SavedListsModal';
+import ConfirmationModal from './ConfirmationModal';
+import DecisionModal, { DecisionAction } from './DecisionModal';
+import RouletteSetupModal from './RouletteSetupModal';
 import { CATALOG, THEMES } from './constants';
 import { SavedList, CatalogList } from './types';
 
@@ -16,10 +19,17 @@ const App: React.FC = () => {
     const [spinTrigger, setSpinTrigger] = useState(0);
     const [stopTrigger, setStopTrigger] = useState(0);
     const [winner, setWinner] = useState<string | null>(null);
+    
+    // Settings State
     const [removeAfterSpin, setRemoveAfterSpin] = useState(false);
+    const [spinCenterImage, setSpinCenterImage] = useState(false);
     const [currentTheme, setCurrentTheme] = useState('rainbow');
     const [wheelSize, setWheelSize] = useState(400); 
     const [isHistoryOpen, setIsHistoryOpen] = useState(false); 
+    
+    // Special Modes
+    const [isRouletteMode, setIsRouletteMode] = useState(false);
+    
     const [history, setHistory] = useState<string[]>([]);
     const [savedLists, setSavedLists] = useState<SavedList[]>([]);
     const [showListsModal, setShowListsModal] = useState(false);
@@ -29,12 +39,27 @@ const App: React.FC = () => {
     const [editingText, setEditingText] = useState(""); 
 
     const [showCatalog, setShowCatalog] = useState(false);
+    const [showRouletteModal, setShowRouletteModal] = useState(false);
 
     const [imageToCrop, setImageToCrop] = useState<string | null>(null);
 
+    // Confirmation Modal State (Simple Yes/No)
+    const [confirmation, setConfirmation] = useState<{ isOpen: boolean; message: string; onConfirm: () => void }>({
+        isOpen: false,
+        message: "",
+        onConfirm: () => {}
+    });
+
+    // Decision Modal State (Multiple choices)
+    const [decision, setDecision] = useState<{ isOpen: boolean; title: string; message: string; actions: DecisionAction[] }>({
+        isOpen: false,
+        title: "",
+        message: "",
+        actions: []
+    });
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
-    const [uploadTarget, setUploadTarget] = useState<'editor' | 'library'>('editor');
 
     const groupedItems = useMemo(() => {
         const groups: Record<string, number> = {};
@@ -54,6 +79,7 @@ const App: React.FC = () => {
         setCurrentListName(randomList.name);
         setCurrentListId(null);
         setCenterImage(randomList.icon || randomCat.emoji);
+        setIsRouletteMode(false);
     };
 
     // Initialization and Persistence
@@ -75,6 +101,7 @@ const App: React.FC = () => {
         if (storedSettings) {
             const settings = JSON.parse(storedSettings);
             setRemoveAfterSpin(settings.removeAfterSpin || false);
+            if (typeof settings.spinCenterImage !== 'undefined') setSpinCenterImage(settings.spinCenterImage);
             if (settings.theme) setCurrentTheme(settings.theme);
             if (settings.wheelSize) setWheelSize(settings.wheelSize);
             if (typeof settings.isHistoryOpen !== 'undefined') setIsHistoryOpen(settings.isHistoryOpen);
@@ -118,12 +145,13 @@ const App: React.FC = () => {
     useEffect(() => {
         localStorage.setItem('wheel_settings', JSON.stringify({ 
             removeAfterSpin, 
+            spinCenterImage,
             theme: currentTheme,
             wheelSize,
             isHistoryOpen
         }));
         localStorage.setItem('wheel_history', JSON.stringify(history));
-    }, [removeAfterSpin, history, currentTheme, wheelSize, isHistoryOpen]);
+    }, [removeAfterSpin, spinCenterImage, history, currentTheme, wheelSize, isHistoryOpen]);
 
     useEffect(() => {
         localStorage.setItem('wheel_saved_lists', JSON.stringify(savedLists));
@@ -168,12 +196,18 @@ const App: React.FC = () => {
 
     const deleteSavedList = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        const newLists = savedLists.filter(l => l.id !== id);
-        setSavedLists(newLists);
-        if (currentListId === id) {
-           setCurrentListId(null);
-           localStorage.removeItem('wheel_last_list_id');
-        }
+        setConfirmation({
+            isOpen: true,
+            message: "Вы уверены, что хотите удалить этот список навсегда?",
+            onConfirm: () => {
+                const newLists = savedLists.filter(l => l.id !== id);
+                setSavedLists(newLists);
+                if (currentListId === id) {
+                    setCurrentListId(null);
+                    localStorage.removeItem('wheel_last_list_id');
+                }
+            }
+        });
     };
 
     const loadList = (list: SavedList) => {
@@ -186,16 +220,39 @@ const App: React.FC = () => {
         setShowListsModal(false);
         setIsSpinning(false);
         setWinner(null);
+        setIsRouletteMode(false);
     };
 
     const loadFromCatalog = (list: CatalogList, icon: string) => {
-        setItems(list.items);
-        setCurrentListName(list.name);
-        setCurrentListId(null);
-        setCenterImage(icon);
-        setShowCatalog(false);
-        setIsSpinning(false);
-        setWinner(null);
+        const applyReplace = () => {
+            setItems(list.items);
+            setCurrentListName(list.name);
+            setCurrentListId(null);
+            setCenterImage(icon);
+            setShowCatalog(false);
+            setIsSpinning(false);
+            setWinner(null);
+            setIsRouletteMode(false);
+        };
+
+        const applyMerge = () => {
+            setItems(prev => [...prev, ...list.items]);
+            setShowCatalog(false);
+        };
+
+        if (items.length > 0) {
+            setDecision({
+                isOpen: true,
+                title: "Список не пуст",
+                message: `Ваш текущий список содержит ${items.length} вариантов. Что сделать с новым списком "${list.name}"?`,
+                actions: [
+                    { label: "Заменить текущий", onClick: applyReplace, type: 'primary' },
+                    { label: "Добавить к текущему", onClick: applyMerge, type: 'secondary' }
+                ]
+            });
+        } else {
+            applyReplace();
+        }
     };
 
     const handleShare = () => {
@@ -301,14 +358,35 @@ const App: React.FC = () => {
         }
     };
 
-    const triggerFileUpload = (target: 'editor' | 'library') => {
-        setUploadTarget(target);
+    const handleClearList = () => {
+        if (items.length > 0) {
+            setConfirmation({
+                isOpen: true,
+                message: "Вы действительно хотите очистить текущий список?",
+                onConfirm: () => setItems([])
+            });
+        }
+    };
+
+    const handleClearHistory = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (history.length > 0) {
+            setConfirmation({
+                isOpen: true,
+                message: "Очистить историю вращений?",
+                onConfirm: () => setHistory([])
+            });
+        }
+    };
+
+    const triggerFileUpload = () => {
         fileInputRef.current?.click();
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        
         const reader = new FileReader();
         reader.onload = (event) => {
             const text = event.target?.result as string;
@@ -316,24 +394,36 @@ const App: React.FC = () => {
                 const newItems = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
                 if (newItems.length > 0) {
                     const name = file.name.replace(/\.[^/.]+$/, "");
-                    if (uploadTarget === 'library') {
-                        const newId = saveListInternal(name, newItems, undefined, 'rainbow', null);
-                        if (newId) {
-                            setItems(newItems);
-                            setCurrentListName(name);
-                            setCurrentListId(newId);
-                            setCenterImage(undefined);
-                            localStorage.setItem('wheel_last_list_id', newId);
-                        }
-                        setShowListsModal(false);
-                    } else {
-                        setItems(newItems);
-                        setCurrentListName(name);
-                        setCurrentListId(null);
-                        setCenterImage(undefined);
-                    }
-                    setIsSpinning(false);
-                    setWinner(null);
+                    
+                    setDecision({
+                        isOpen: true,
+                        title: "Файл загружен",
+                        message: `Файл "${file.name}" содержит ${newItems.length} вариантов. Что сделать?`,
+                        actions: [
+                            { 
+                                label: "Открыть сейчас (заменит текущий)", 
+                                type: 'primary',
+                                onClick: () => {
+                                    setItems(newItems);
+                                    setCurrentListName(name);
+                                    setCurrentListId(null);
+                                    setCenterImage(undefined);
+                                    setIsSpinning(false);
+                                    setWinner(null);
+                                    setShowListsModal(false);
+                                    setIsRouletteMode(false);
+                                }
+                            },
+                            { 
+                                label: "Сохранить в Мои списки", 
+                                type: 'secondary',
+                                onClick: () => {
+                                    saveListInternal(name, newItems, undefined, 'rainbow', null);
+                                    setShowListsModal(true); // Ensure user sees it happened
+                                }
+                            }
+                        ]
+                    });
                 }
             }
         };
@@ -360,6 +450,33 @@ const App: React.FC = () => {
         setImageToCrop(null);
     };
 
+    const startRussianRoulette = (bullets: number) => {
+        const emptyChambers = 6 - bullets;
+        // Create array with distinct identifiers for visual difference or identical for suspense. 
+        // For distinct visual segments in SpinWheel with disableGrouping, we need unique items in logic 
+        // OR rely on the fact that disableGrouping maps index 1:1.
+        
+        // We will just use strings. Shuffle them.
+        const chamber = [
+            ...Array(bullets).fill('БАХ 💥'),
+            ...Array(emptyChambers).fill('ЩЕЛК 😅')
+        ];
+        
+        // Fisher-Yates Shuffle
+        for (let i = chamber.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [chamber[i], chamber[j]] = [chamber[j], chamber[i]];
+        }
+
+        setItems(chamber);
+        setCurrentListName("Русская Рулетка");
+        setCurrentTheme('revolver');
+        setCenterImage('💀'); 
+        setIsRouletteMode(true);
+        setCurrentListId(null);
+        setWinner(null);
+    };
+
     return (
         <div className={`min-h-screen transition-colors duration-300 overflow-x-hidden ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".txt" className="hidden" />
@@ -369,10 +486,34 @@ const App: React.FC = () => {
                 <ImageCropper 
                     imageUrl={imageToCrop} 
                     onCancel={() => setImageToCrop(null)} 
-                    onSave={handleCropSave}
+                    onSave={handleCropSave} 
                     isDark={isDark}
                 />
             )}
+            
+            <ConfirmationModal 
+                isOpen={confirmation.isOpen}
+                message={confirmation.message}
+                onConfirm={confirmation.onConfirm}
+                onCancel={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                isDark={isDark}
+            />
+
+            <DecisionModal
+                isOpen={decision.isOpen}
+                title={decision.title}
+                message={decision.message}
+                actions={decision.actions}
+                onCancel={() => setDecision(prev => ({ ...prev, isOpen: false }))}
+                isDark={isDark}
+            />
+
+            <RouletteSetupModal 
+                isOpen={showRouletteModal}
+                onClose={() => setShowRouletteModal(false)}
+                onStart={startRussianRoulette}
+                isDark={isDark}
+            />
 
             <nav className="w-full px-4 sm:px-6 py-4 flex justify-between items-center max-w-7xl mx-auto">
                 <div className="flex items-center gap-4">
@@ -387,6 +528,13 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2">
                     <button onClick={handleShare} className={`p-2 rounded-full transition-colors ${isDark ? 'text-indigo-400 hover:bg-slate-800' : 'text-indigo-600 hover:bg-indigo-50'}`} title="Поделиться списком">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                    </button>
+                    <button 
+                        onClick={() => setShowRouletteModal(true)} 
+                        className={`p-2 rounded-full transition-colors ${isDark ? 'bg-slate-800 text-red-500 hover:bg-slate-700 shadow-slate-900/50' : 'bg-white text-red-600 shadow-sm hover:bg-slate-100 border border-slate-200'} shadow-lg active:scale-95`} 
+                        title="Русская Рулетка"
+                    >
+                        🔫
                     </button>
                     <button onClick={() => setIsDark(!isDark)} className={`p-2 rounded-full transition-colors ${isDark ? 'bg-slate-800 text-yellow-400 hover:bg-slate-700 shadow-slate-900/50' : 'bg-white text-slate-800 shadow-sm hover:bg-slate-100 border border-slate-200'} shadow-lg active:scale-95`}>
                         {isDark ? "☀️" : "🌙"}
@@ -405,7 +553,19 @@ const App: React.FC = () => {
                         <div className="w-64 h-64 rounded-full border-4 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 p-6 text-center animate-pulse">Добавьте хотя бы 2 варианта в список справа 👉</div>
                       ) : (
                         <div className="w-full flex justify-center transform transition-transform hover:scale-[1.02] duration-500">
-                            <SpinWheel segments={items} isSpinning={isSpinning} onSpinEnd={handleSpinEnd} spinTrigger={spinTrigger} stopTrigger={stopTrigger} centerImage={centerImage} onCenterClick={() => imageInputRef.current?.click()} theme={currentTheme} size={wheelSize} />
+                            <SpinWheel 
+                                segments={items} 
+                                isSpinning={isSpinning} 
+                                onSpinEnd={handleSpinEnd} 
+                                spinTrigger={spinTrigger} 
+                                stopTrigger={stopTrigger} 
+                                centerImage={centerImage} 
+                                onCenterClick={() => imageInputRef.current?.click()} 
+                                theme={currentTheme} 
+                                size={wheelSize} 
+                                spinCenterImage={spinCenterImage}
+                                disableGrouping={isRouletteMode}
+                            />
                         </div>
                       )}
                       <button onClick={handleSpinClick} disabled={items.length < 2} className={`mt-6 px-16 py-5 rounded-2xl text-xl font-bold shadow-xl transition-all ${items.length < 2 ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed scale-95' : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:scale-105 hover:shadow-indigo-500/30 active:scale-95'}`}>{isSpinning ? 'Пропустить' : 'Крутить Колесо!'}</button>
@@ -417,9 +577,8 @@ const App: React.FC = () => {
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
                             <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Варианты</h3>
                             <div className="flex gap-2 w-full sm:w-auto">
+                                <button onClick={handleClearList} disabled={items.length === 0 || isSpinning} className={`h-8 px-3 flex-1 sm:flex-none text-xs font-medium text-red-500 hover:text-red-600 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed`}>Очистить</button>
                                 <button onClick={saveCurrentList} className={`h-8 w-8 flex-none flex items-center justify-center rounded-xl transition-colors ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`} title="Сохранить список">💾</button>
-                                <button onClick={() => triggerFileUpload('editor')} className={`h-8 px-3 flex-1 sm:flex-none text-xs font-medium rounded-xl transition-colors flex items-center justify-center gap-1 ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>.txt</button>
-                                <button onClick={() => setItems([])} className="h-8 px-3 flex-1 sm:flex-none text-xs font-medium text-red-500 hover:text-red-600 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center" disabled={isSpinning}>Очистить</button>
                                 <button onClick={() => setShowCatalog(true)} className="h-8 px-3 flex-1 sm:flex-none text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 rounded-xl hover:bg-emerald-200 dark:hover:bg-emerald-900 transition-colors flex items-center justify-center gap-1 shadow-sm whitespace-nowrap">📚 Каталог</button>
                             </div>
                         </div>
@@ -471,7 +630,7 @@ const App: React.FC = () => {
                         >
                             <span>История ({history.length})</span>
                             <div className="flex items-center gap-4">
-                                 {history.length > 0 && <button onClick={(e) => { e.stopPropagation(); setHistory([]); }} className="text-xs text-red-400 hover:text-red-500 underline z-10 mr-2">Очистить</button>}
+                                 {history.length > 0 && <button onClick={handleClearHistory} className="text-xs text-red-400 hover:text-red-500 underline z-10 mr-2">Очистить</button>}
                                  <svg className={`w-5 h-5 transform transition-transform duration-200 ${isHistoryOpen ? 'rotate-180' : ''} opacity-50`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                             </div>
                         </div>
@@ -516,13 +675,22 @@ const App: React.FC = () => {
                                     />
                                 </div>
 
-                                <div className={`flex items-center justify-between p-3 rounded-xl mb-6 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`flex items-center justify-between p-3 rounded-xl mb-3 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                                     <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Удалять выпавший вариант</span>
                                     <label className="relative inline-flex items-center cursor-pointer">
                                         <input type="checkbox" checked={removeAfterSpin} onChange={(e) => setRemoveAfterSpin(e.target.checked)} className="sr-only peer" />
                                         <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
                                     </label>
                                 </div>
+
+                                <div className={`flex items-center justify-between p-3 rounded-xl mb-6 border ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                                    <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Крутящаяся картинка</span>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" checked={spinCenterImage} onChange={(e) => setSpinCenterImage(e.target.checked)} className="sr-only peer" />
+                                        <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                                    </label>
+                                </div>
+
                                 <div>
                                     <span className={`text-sm font-medium block mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Стиль колеса</span>
                                     <div className="grid grid-cols-4 gap-2">
@@ -566,8 +734,8 @@ const App: React.FC = () => {
                     onClose={() => setShowListsModal(false)}
                     onLoadList={loadList}
                     onDeleteList={deleteSavedList}
-                    onCreateNew={() => { setItems([]); setCurrentListName("Новый список"); setCurrentListId(null); setCenterImage(undefined); setCurrentTheme('rainbow'); setShowListsModal(false); localStorage.removeItem('wheel_last_list_id'); }}
-                    onUploadTxt={() => triggerFileUpload('library')}
+                    onCreateNew={() => { setItems([]); setCurrentListName("Новый список"); setCurrentListId(null); setCenterImage(undefined); setCurrentTheme('rainbow'); setShowListsModal(false); localStorage.removeItem('wheel_last_list_id'); setIsRouletteMode(false); }}
+                    onUploadTxt={triggerFileUpload}
                 />
             )}
         </div>

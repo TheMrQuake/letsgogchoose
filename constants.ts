@@ -92,5 +92,6 @@ export const THEMES: Record<string, string[]> = {
   sunset: ['#355070', '#6d597a', '#b56576', '#e56b6f', '#eaac8b'],
   forest: ['#2d6a4f', '#40916c', '#52b788', '#d8f3dc', '#1b4332'],
   ocean: ['#03045e', '#0077b6', '#00b4d8', '#90e0ef', '#caf0f8'],
-  monochrome: ['#212529', '#343a40', '#495057', '#6c757d', '#adb5bd']
+  monochrome: ['#212529', '#343a40', '#495057', '#6c757d', '#adb5bd'],
+  revolver: ['#1a1a1a', '#2b2b2b', '#1a1a1a', '#2b2b2b', '#1a1a1a', '#2b2b2b']
 };

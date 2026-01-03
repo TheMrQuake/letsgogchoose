@@ -28,7 +28,6 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ imageUrl, onCancel, onSave,
 
     const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
         if (!isDragging) return;
-        // e.preventDefault(); // handled by React generally, but might need passive: false for touch in vanilla
         const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
         setPosition({ x: clientX - startPos.x, y: clientY - startPos.y });

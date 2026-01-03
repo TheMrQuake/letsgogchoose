@@ -27,6 +27,7 @@ export interface CatalogCategory {
 
 export interface Settings {
   removeAfterSpin: boolean;
+  spinCenterImage: boolean;
   theme: string;
   wheelSize: number;
   isHistoryOpen: boolean;
