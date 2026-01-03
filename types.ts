@@ -16,6 +16,7 @@ export interface CatalogList {
   name: string;
   items: string[];
   icon?: string;
+  theme?: string;
 }
 
 export interface CatalogCategory {

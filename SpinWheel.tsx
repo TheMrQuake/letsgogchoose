@@ -15,6 +15,8 @@ interface SpinWheelProps {
     size?: number;
     spinCenterImage?: boolean;
     disableGrouping?: boolean;
+    hideText?: boolean;
+    disableWinSound?: boolean;
 }
 
 const SpinWheel: React.FC<SpinWheelProps> = ({ 
@@ -28,7 +30,9 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
     theme = 'rainbow', 
     size = 400,
     spinCenterImage = false,
-    disableGrouping = false
+    disableGrouping = false,
+    hideText = false,
+    disableWinSound = false
 }) => {
     const canvasRef = useRef<HTMLDivElement>(null);
     const centerRotationRef = useRef<HTMLDivElement>(null);
@@ -125,10 +129,10 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
             const winnerSeg = getSegmentAtTop(currentRotation.current);
             const winnerText = winnerSeg ? winnerSeg.text : (segments[0] || 'Error');
             
-            playWinSound();
+            if (!disableWinSound) playWinSound();
             onSpinEnd(winnerText);
         }
-    }, [stopTrigger, isSpinning, segments, groupedSegments, onSpinEnd]);
+    }, [stopTrigger, isSpinning, segments, groupedSegments, onSpinEnd, disableWinSound]);
 
     // Handle center rotation reset if setting changes
     useEffect(() => {
@@ -172,7 +176,7 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
                 velocity.current = 0;
                 const winnerSeg = getSegmentAtTop(currentRotation.current);
                 const winnerText = winnerSeg ? winnerSeg.text : segments[0];
-                playWinSound();
+                if (!disableWinSound) playWinSound();
                 onSpinEnd(winnerText);
                 if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
             } else {
@@ -182,19 +186,25 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
         if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
         animate();
         return () => { if (animFrameId.current) cancelAnimationFrame(animFrameId.current); };
-    }, [spinTrigger, groupedSegments, segments, stopTrigger, onSpinEnd, spinCenterImage]);
+    }, [spinTrigger, groupedSegments, segments, stopTrigger, onSpinEnd, spinCenterImage, disableWinSound]);
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!isSpinning) setMousePos({ x: e.clientX, y: e.clientY });
     };
 
     const count = groupedSegments.length;
+    // Calculate spacing based on count. 264 is the circumference approximation for text placement radius
     const textSpace = 264 / (count || 1);
-    const dynamicFontSize = textSpace * 0.6;
-    const fontSize = Math.max(0.8, Math.min(5, dynamicFontSize));
+    
+    // REDUCED SCALE: Changed from 0.6 to 0.4 (approx 1.5x smaller)
+    const dynamicFontSize = textSpace * 0.4;
+    
+    // ADJUSTED LIMITS: Min 0.5 (was 0.8), Max 3.5 (was 5.0)
+    const fontSize = Math.max(0.5, Math.min(3.5, dynamicFontSize));
 
-    const calculatedMaxChars = Math.floor(40 / (fontSize * 0.6));
-    const maxChars = Math.min(30, Math.max(8, calculatedMaxChars));
+    // Recalculate max chars based on new smaller font size allowing slightly more text
+    const calculatedMaxChars = Math.floor(45 / (fontSize * 0.5));
+    const maxChars = Math.min(35, Math.max(10, calculatedMaxChars));
     
     const showTextThreshold = 3;
 
@@ -220,12 +230,16 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
                   {groupedSegments.map((seg) => {
                       const path = getSectorPath(seg.startAngle, seg.endAngle, 50);
                       const midAngle = (seg.startAngle + seg.endAngle) / 2;
+                      
                       let displayText = seg.text;
-                      if (displayText.length > maxChars) displayText = displayText.substring(0, maxChars) + '..';
+                      if (hideText) displayText = "?";
+                      else if (displayText.length > maxChars) displayText = displayText.substring(0, maxChars) + '..';
+                      
                       const angleDiff = seg.endAngle - seg.startAngle;
                       const showText = angleDiff > showTextThreshold;
+                      
                       return (
-                          <g key={seg.id} onMouseEnter={() => !isSpinning && setHoveredText(`${seg.text}${seg.count > 1 ? ` (x${seg.count})` : ''}`)} style={{ cursor: isSpinning ? 'default' : 'help' }}>
+                          <g key={seg.id} onMouseEnter={() => !isSpinning && !hideText && setHoveredText(`${seg.text}${seg.count > 1 ? ` (x${seg.count})` : ''}`)} style={{ cursor: isSpinning ? 'default' : 'help' }}>
                               <path d={path} fill={seg.color} stroke="transparent" />
                               {showText && (
                                   <g transform={`rotate(${midAngle}, 50, 50)`}>
@@ -233,7 +247,7 @@ const SpinWheel: React.FC<SpinWheelProps> = ({
                                         x="92" 
                                         y="50" 
                                         fill="white" 
-                                        fontSize={fontSize} 
+                                        fontSize={hideText ? fontSize * 1.5 : fontSize} 
                                         fontWeight="600" 
                                         textAnchor="end" 
                                         dominantBaseline="middle" 
